@@ -1,0 +1,170 @@
+/*
+ * Este programa es la tesis de grado de Diego Alejandro y María Teresa
+ * El proyecto consiste en un localizador de objetos
+ * El dispositivo utilizado es la ESP32 Dev Kit, buzzer, demas dispositivos para que funcione
+ * Buzzer en pin 13
+*/
+#include <ThingerESP32.h>
+#include "arduino_secrets.h"
+#include <EEPROM.h>
+#define MAX 20
+#define EEPROM_SIZE 201
+#define Stack_eeprom_size 40
+
+ThingerESP32 thing(USERNAME, DEVICE_ID, DEVICE_CREDENTIAL);
+
+char redname[MAX];
+char redpassword[MAX];
+int toLNP = 0;
+void setup() {
+  
+  Serial.begin(9600);         // inicializar puerto
+  pinMode(13, OUTPUT);        // conf pin 13 de salida
+  pinMode(2, OUTPUT);         // conf pin 02 de salida
+  EEPROM.begin(EEPROM_SIZE);  // inicializar mem no volatil
+  delay(2000);
+  
+  thing["GPIO_2"] << digitalPin(2);     // entradas desde thinger, salida del esp
+  thing["GPIO_13"] << digitalPin(13);   // entradas desde thinger, salida del esp
+
+  cleararray(redname);
+  cleararray(redpassword);
+}
+void loop() {
+  if(WiFi.status() == WL_CONNECTED){
+    thing.handle();
+  }else{
+    delay(500);
+    if(red_in_memmory()){                 // revisar si hay redes guardadas
+      if(red_available()){                // revisar si la red esta disponible, y guardad
+        load_name_psw(toLNP);             // cargar desde memoria name y password
+        try_connection();                 // intentar conexion
+      }
+    }
+    // put your main code here, to run repeatedly:
+    if( Serial.available() )
+    {
+      Serial.readString().toCharArray(redname,MAX);
+      if(redname[0] == 'R' && redname[1] == 'S'){ 
+        Serial.println("0");
+        limpiar_EEPROM();
+      }else{
+        Serial.println("1");
+        while(!Serial.available()){};
+        Serial.println("2");
+        Serial.readString().toCharArray(redpassword,MAX);
+        AdecuateData(redname);
+        AdecuateData(redpassword);
+        //thing.add_wifi("DyMTesis", "DyMtesis");
+        try_connection();
+      }
+    }
+  }
+}
+
+void AdecuateData(char Buffer[]){
+  // solo caracteres o numeros permitidos, sin caracteres fantasma en un array
+  int m = 0;
+  bool j = false;
+  for(int i = 0; i < MAX; i++){
+    if((Buffer[i] <= 'z' && Buffer[i] >= 'a')||(Buffer[i] <= 'Z' && Buffer[i] >= 'A')||(Buffer[i] <= '9' && Buffer[i] >= '0') ){}
+    else{
+      for(int t =i;t<MAX;t++){
+        Buffer[t] = 0;  
+      }
+      break;
+    }
+  }
+}
+
+void cleararray(char *var){
+  for(int i = 0; i < sizeof(var); i++){
+    var[i] = 0;
+  }
+}
+
+bool red_in_memmory(void){
+  //Serial.print("Redes en EEPROM: ");
+  //Serial.println(EEPROM.read(200));
+  if(EEPROM.read(200) != 0)   //si hay redes guardadas true si no false
+    return true;
+  return false;
+}
+
+bool red_available(void){
+  int Nredes = WiFi.scanNetworks();
+  char ssid[MAX];
+ 
+  for(int i = 0; i < Nredes; i++){                    //para cada red escaneada
+    cleararray(ssid);
+    for(int j = 0; j < EEPROM.read(200); j = j+2){    //para cada red guardada
+      WiFi.SSID(i).toCharArray(ssid,MAX);
+      AdecuateData(ssid);
+      //Serial.print("Red Encontrada: ");
+      //Serial.println(WiFi.SSID(i));
+      for(int k = 0; k < MAX; k++){                   //comparar letra por letra
+        //Serial.println("comparar:");
+        //Serial.println(ssid[k]);
+        //Serial.println((char)EEPROM.read( (j * (MAX)) + k ));
+        if(ssid[k] == EEPROM.read( (j * (MAX)) + k ) ){
+          if(k == MAX-1){
+            toLNP = j;
+            return true;
+          }
+        }else{
+          break;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+void load_name_psw(int index){
+for(int i = 0; i < MAX; i++){               //igualar memoria a variables 
+    redname[i] = EEPROM.read((index*MAX)+i);
+    redpassword[i] = EEPROM.read(((index+1)*MAX)+i);
+  }
+}
+
+bool try_connection(void){
+  thing.add_wifi(redname, redpassword);
+
+  for(int i = 0; i < 5; i++){
+    thing.handle();
+    delay(500);
+    if(WiFi.status() == WL_CONNECTED)
+    {
+      Serial.println("SC");
+      save_red();
+      return true;
+      
+    }else{
+      Serial.println("NC");
+    }
+  }
+  return false;
+}
+void save_red(void){
+  int aux = EEPROM.read(200);
+  if(aux == 3){
+    EEPROM.write(200,1);
+    EEPROM.commit();
+    delay(1000);
+  }
+  for(int i = 0; i < MAX; i++){
+    EEPROM.write((i+(aux*Stack_eeprom_size)),redname[i]);
+    EEPROM.write((i+((aux+1)*MAX)+(aux*MAX)),redpassword[i]);
+  }
+  EEPROM.write(200,(aux+1));
+  EEPROM.commit();
+  delay(1000);
+} 
+
+
+void limpiar_EEPROM(void){
+  for (int i = 0; i < EEPROM_SIZE; i++){
+    EEPROM.write(i,0);
+  }
+  EEPROM.commit();
+}
